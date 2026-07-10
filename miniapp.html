@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang='fr'>
+<head>
+<meta charset='utf-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1, viewport-fit=cover'>
+<script src='https://telegram.org/js/telegram-web-app.js'></script>
+<title>Ora</title>
+<style>
+:root{--bg:#0f1115;--fg:#ffffff;--hint:#8a8f98;--btn:#2ea6ff;--card:#1c1f26}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--fg)}
+.wrap{padding:14px;max-width:640px;margin:0 auto}
+h1{font-size:18px;margin:6px 2px 2px}
+.sub{color:var(--hint);font-size:13px;margin:0 2px 12px}
+.days{display:flex;gap:8px;overflow-x:auto;padding-bottom:6px}
+.day{flex:0 0 auto;background:var(--card);border:none;color:var(--fg);border-radius:14px;padding:9px 12px;font-size:12px;text-align:center;min-width:62px;cursor:pointer}
+.day span{color:var(--hint)}
+.day.active{background:var(--btn);color:#fff}
+.day.active span{color:#eaf5ff}
+.day b{display:block;font-size:15px;margin-top:2px}
+.slots{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-top:14px}
+.slot{background:var(--card);border:none;color:var(--fg);border-radius:12px;padding:15px 0;font-size:15px;font-weight:600;cursor:pointer}
+.slot.eve{background:#241f33}
+.empty{color:var(--hint);text-align:center;margin-top:34px;font-size:14px;line-height:1.5}
+.loading{color:var(--hint);text-align:center;margin-top:34px}
+.legend{color:var(--hint);font-size:12px;margin-top:16px;text-align:center}
+</style>
+</head>
+<body>
+<div class='wrap'>
+<h1>Reserver un court</h1>
+<p class='sub'>Ora - HaUmanut 3, Netanya</p>
+<div class='days' id='days'></div>
+<div id='slots' class='slots'></div>
+<div id='msg'></div>
+<div class='legend'>Les creneaux du soir (lune) s ouvrent selon votre niveau.</div>
+</div>
+<script>
+var API = 'https://qlmdaustiymogpjwndzz.supabase.co/functions/v1/miniapp';
+var tg = window.Telegram ? window.Telegram.WebApp : null;
+if (tg) { tg.ready(); tg.expand(); try { var p = tg.themeParams || {}; var r = document.documentElement.style;
+  if (p.bg_color) r.setProperty('--bg', p.bg_color); if (p.text_color) r.setProperty('--fg', p.text_color);
+  if (p.hint_color) r.setProperty('--hint', p.hint_color); if (p.button_color) r.setProperty('--btn', p.button_color);
+  if (p.secondary_bg_color) r.setProperty('--card', p.secondary_bg_color); } catch (e) {} }
+var initData = tg ? tg.initData : '';
+var service = 'padel';
+var days = document.getElementById('days'), slotsEl = document.getElementById('slots'), msgEl = document.getElementById('msg');
+var sel = null;
+function isoDate(d){ return d.toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' }); }
+function api(payload){ payload.initData = initData; return fetch(API, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) }).then(function(r){ return r.json(); }); }
+function buildDays(){ var now = Date.now();
+  for (var i = 0; i < 14; i++) { (function(i){
+    var d = new Date(now + i * 86400000);
+    var b = document.createElement('button'); b.className = 'day';
+    var wd = d.toLocaleDateString('fr-FR', { timeZone: 'Asia/Jerusalem', weekday: 'short' });
+    var dm = d.toLocaleDateString('fr-FR', { timeZone: 'Asia/Jerusalem', day: '2-digit', month: '2-digit' });
+    var top = i === 0 ? 'Auj.' : (i === 1 ? 'Dem.' : wd);
+    b.innerHTML = '<span>' + top + '</span><b>' + dm + '</b>';
+    var ds = isoDate(d);
+    b.onclick = function(){ selectDay(ds, b); };
+    days.appendChild(b);
+    if (i === 0) { sel = ds; b.classList.add('active'); }
+  })(i); }
+}
+function selectDay(ds, btn){ sel = ds; var all = days.querySelectorAll('.day'); for (var i = 0; i < all.length; i++) all[i].classList.remove('active'); btn.classList.add('active'); loadSlots(); }
+function loadSlots(){ slotsEl.innerHTML = ''; msgEl.innerHTML = '<div class=loading>Chargement...</div>';
+  api({ action: 'slots', service: service, date: sel }).then(function(res){ msgEl.innerHTML = '';
+    var s = (res && res.slots) || [];
+    if (!s.length) { slotsEl.innerHTML = ''; msgEl.innerHTML = '<div class=empty>Aucun creneau libre ce jour.<br>Le soir s ouvre selon votre niveau.</div>'; return; }
+    slotsEl.innerHTML = '';
+    s.forEach(function(sl){ var eve = (sl.label || '').indexOf('🌙') >= 0; var b = document.createElement('button'); b.className = 'slot' + (eve ? ' eve' : ''); b.textContent = sl.label; b.onclick = function(){ book(sl); }; slotsEl.appendChild(b); });
+  }).catch(function(){ msgEl.innerHTML = '<div class=empty>Erreur de chargement.</div>'; });
+}
+function book(sl){ var label = (sl.label || '').replace('🌙', '').trim();
+  var go = function(){ msgEl.innerHTML = '<div class=loading>Reservation...</div>';
+    api({ action: 'book', service: service, starts_at: sl.starts_at }).then(function(res){ msgEl.innerHTML = '';
+      var m = (res && res.message) || 'C est fait.';
+      if (tg && tg.showPopup) { tg.showPopup({ title: 'Ora', message: m, buttons: [{ type: 'ok' }] }); } else { alert(m); }
+      loadSlots();
+    }).catch(function(){ msgEl.innerHTML = '<div class=empty>Erreur.</div>'; });
+  };
+  if (tg && tg.showConfirm) { tg.showConfirm('Reserver le creneau ' + label + ' ?', function(ok){ if (ok) go(); }); }
+  else { if (confirm('Reserver ' + label + ' ?')) go(); }
+}
+buildDays(); loadSlots();
+</script>
+</body>
+</html>
